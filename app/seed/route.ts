@@ -20,7 +20,8 @@ async function seedUsers() {
       return sql`
         INSERT INTO users (id, name, email, password)
         VALUES (${user.id}, ${user.name}, ${user.email}, ${hashedPassword})
-        ON CONFLICT (id) DO NOTHING;
+        ON CONFLICT (id) DO UPDATE 
+        SET name = EXCLUDED.name, email = EXCLUDED.email, password = EXCLUDED.password;
       `;
     }),
   );
@@ -46,13 +47,14 @@ async function seedInvoices() {
       (invoice) => sql`
         INSERT INTO invoices (customer_id, amount, status, date)
         VALUES (${invoice.customer_id}, ${invoice.amount}, ${invoice.status}, ${invoice.date})
-        ON CONFLICT (id) DO NOTHING;
+        RETURNING id;
       `,
     ),
   );
 
   return insertedInvoices;
 }
+
 
 async function seedCustomers() {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
@@ -61,7 +63,7 @@ async function seedCustomers() {
     CREATE TABLE IF NOT EXISTS customers (
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
-      email VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL UNIQUE,
       image_url VARCHAR(255) NOT NULL
     );
   `;
@@ -71,7 +73,8 @@ async function seedCustomers() {
       (customer) => sql`
         INSERT INTO customers (id, name, email, image_url)
         VALUES (${customer.id}, ${customer.name}, ${customer.email}, ${customer.image_url})
-        ON CONFLICT (id) DO NOTHING;
+        ON CONFLICT (id) DO UPDATE 
+        SET name = EXCLUDED.name, email = EXCLUDED.email, image_url = EXCLUDED.image_url;
       `,
     ),
   );
@@ -92,7 +95,8 @@ async function seedRevenue() {
       (rev) => sql`
         INSERT INTO revenue (month, revenue)
         VALUES (${rev.month}, ${rev.revenue})
-        ON CONFLICT (month) DO NOTHING;
+        ON CONFLICT (month) DO UPDATE 
+        SET revenue = EXCLUDED.revenue;
       `,
     ),
   );
@@ -102,15 +106,21 @@ async function seedRevenue() {
 
 export async function GET() {
   try {
-    const result = await sql.begin((sql) => [
-      seedUsers(),
-      seedCustomers(),
-      seedInvoices(),
-      seedRevenue(),
-    ]);
+    await sql.begin(async (tx) => {
+      await seedUsers();
+      await seedCustomers();
+      await seedInvoices();
+      await seedRevenue();
+    });
 
     return Response.json({ message: 'Database seeded successfully' });
   } catch (error) {
-    return Response.json({ error }, { status: 500 });
+    console.error("Seeding Error:", error);
+
+    // Safe type checking
+    const errorMessage =
+      error instanceof Error ? error.message : "An unknown error occurred";
+
+    return Response.json({ error: errorMessage }, { status: 500 });
   }
 }
